@@ -140,6 +140,22 @@ automatically and nginx reloads every 6h to pick them up. The `web` entrypoint
 runs migrations, seeds initial content (idempotent), and collects static on
 each start.
 
+### Run on boot (systemd)
+
+To have the production stack start automatically on boot (and stop cleanly on
+shutdown), install the provided systemd service:
+
+```bash
+sudo ./deploy/install-service.sh          # generates + enables 'pathcipher.service'
+sudo systemctl start pathcipher           # bring it up now
+```
+
+The script auto-detects the project path and the Docker Compose command and
+writes an absolute-path unit to `/etc/systemd/system/`. Manage it with
+`systemctl start|stop|status pathcipher` and view logs with
+`journalctl -u pathcipher`. The unit runs `up -d` (no rebuild) so boot stays
+fast; deploy new code with `git pull && docker compose -f docker-compose.prod.yml up -d --build`.
+
 ### Prod settings notes
 
 - `config.settings.prod`: `DEBUG=False`, Postgres required via `DATABASE_URL`,
