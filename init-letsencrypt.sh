@@ -13,7 +13,27 @@
 #
 set -euo pipefail
 
-COMPOSE="docker compose -f docker-compose.prod.yml"
+# --- Preflight: is the Docker daemon reachable? ---
+if ! docker info >/dev/null 2>&1; then
+  echo "ERROR: cannot talk to the Docker daemon." >&2
+  echo "  * Start it:      sudo systemctl start docker  (then: sudo systemctl enable docker)" >&2
+  echo "  * Permissions:   sudo usermod -aG docker \"\$USER\"  then log out/in (or: newgrp docker)" >&2
+  echo "  * Verify:        docker info" >&2
+  exit 1
+fi
+
+# --- Pick a Compose command: prefer v2 ('docker compose'), fall back to v1. ---
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE="docker compose -f docker-compose.prod.yml"
+elif command -v docker-compose >/dev/null 2>&1; then
+  echo "NOTE: using legacy docker-compose v1. Compose v2 is recommended:" >&2
+  echo "      sudo apt-get install docker-compose-plugin   (then use 'docker compose')" >&2
+  COMPOSE="docker-compose -f docker-compose.prod.yml"
+else
+  echo "ERROR: no Docker Compose found. Install the plugin:" >&2
+  echo "       sudo apt-get install docker-compose-plugin" >&2
+  exit 1
+fi
 
 if [ ! -f .env ]; then
   echo "ERROR: .env not found. Copy .env.example to .env and fill it in." >&2
