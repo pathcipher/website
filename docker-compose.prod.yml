@@ -65,10 +65,15 @@ services:
       - "443:443"
     depends_on:
       - web
-    # Reload every 6h so renewed certs are picked up without downtime.
+    # We override the command to add a 6h reload loop (picks up renewed certs
+    # without downtime). Because the command no longer starts with "nginx", the
+    # image skips its config-templating step, so we run the envsubst script
+    # ourselves first — otherwise our default.conf.template is never rendered
+    # and nginx serves its stock config (which 404s the ACME challenge).
     command: >
-      sh -c "while :; do sleep 6h & wait $${!}; nginx -s reload; done &
-             exec nginx -g 'daemon off;'"
+      sh -c "/docker-entrypoint.d/20-envsubst-on-templates.sh;
+      while :; do sleep 6h & wait $${!}; nginx -s reload; done &
+      exec nginx -g 'daemon off;'"
 
   certbot:
     image: certbot/certbot
