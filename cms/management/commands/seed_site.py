@@ -5,6 +5,8 @@ page, and point the default Wagtail Site at it.
 Idempotent: running it again is a no-op once a HomePage exists. Intended to run
 once after `migrate` (the Docker entrypoint does this automatically).
 """
+import os
+
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
@@ -106,14 +108,23 @@ class Command(BaseCommand):
             ),
         ))
 
+        # Point the Site at the real domain when DOMAIN is set (prod), so that
+        # Wagtail page previews build a request host that is in ALLOWED_HOSTS.
+        # Falls back to localhost for local development.
+        domain = os.environ.get("DOMAIN", "").strip()
+        hostname = domain or "localhost"
+        port = 443 if domain else 80
+
         site = Site.objects.filter(is_default_site=True).first()
         if site:
             site.root_page = home
             site.site_name = "Pathcipher Events"
+            site.hostname = hostname
+            site.port = port
             site.save()
         else:
             Site.objects.create(
-                hostname="localhost", port=80, root_page=home,
+                hostname=hostname, port=port, root_page=home,
                 is_default_site=True, site_name="Pathcipher Events",
             )
 
