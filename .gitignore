@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+.venv/
+venv/
+env/
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Media & collected static
+/media/
+/staticfiles/
+
+# Certbot / TLS material (never commit certs or keys)
+/certbot/
+/nginx/ssl/
+*.pem
+*.key
+*.crt
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

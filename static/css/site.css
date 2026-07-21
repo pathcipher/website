@@ -1,0 +1,37 @@
+/*
+ * Custom styles layered on top of Tailwind.
+ * Keep this small — prefer Tailwind utilities in templates. This file holds
+ * keyframe animations and a couple of niceties that are awkward as utilities.
+ */
+
+/* Fade + rise-in for hero and section headers. */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up {
+  animation: fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Slow drifting blobs behind the hero. */
+@keyframes blob {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%      { transform: translate(30px, -40px) scale(1.1); }
+  66%      { transform: translate(-20px, 20px) scale(0.95); }
+}
+.animate-blob {
+  animation: blob 14s ease-in-out infinite;
+}
+
+.animation-delay-2000 { animation-delay: 2s; }
+.animation-delay-4000 { animation-delay: 4s; }
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .animate-blob {
+    animation: none;
+  }
+}
+
+html { background-color: #0b0f1a; }

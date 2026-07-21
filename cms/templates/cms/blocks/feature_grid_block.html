@@ -1,0 +1,11 @@
+{% load wagtailcore_tags %}
+<div>
+  {% if value.heading %}
+    <h2 class="mb-8 font-display text-3xl font-bold tracking-tight md:text-4xl">{{ value.heading }}</h2>
+  {% endif %}
+  <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+    {% for card in value.cards %}
+      {% include_block card %}
+    {% endfor %}
+  </div>
+</div>

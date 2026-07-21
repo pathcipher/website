@@ -1,0 +1,6 @@
+{% load wagtailcore_tags %}
+<div class="stream-body space-y-8">
+  {% for block in body %}
+    {% include_block block %}
+  {% endfor %}
+</div>

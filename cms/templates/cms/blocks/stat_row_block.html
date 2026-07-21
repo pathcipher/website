@@ -1,0 +1,6 @@
+{% load wagtailcore_tags %}
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+  {% for stat in value.stats %}
+    {% include_block stat %}
+  {% endfor %}
+</div>

@@ -1,0 +1,7 @@
+{% if value.size == "h2" %}
+  <h2 class="font-display text-3xl font-bold tracking-tight md:text-4xl">{{ value.text }}</h2>
+{% elif value.size == "h3" %}
+  <h3 class="font-display text-2xl font-semibold tracking-tight">{{ value.text }}</h3>
+{% else %}
+  <h4 class="font-display text-xl font-semibold">{{ value.text }}</h4>
+{% endif %}

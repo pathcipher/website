@@ -1,0 +1,52 @@
+# Local development stack: Postgres + Django/Wagtail (runserver, autoreload).
+#
+#   cp .env.example .env   # then edit
+#   docker compose up --build
+#
+# Public site:  http://localhost:8000/
+# Admin (PM):   http://localhost:8000/admin/
+# Wagtail CMS:  http://localhost:8000/cms/
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-puzzle}
+      POSTGRES_USER: ${POSTGRES_USER:-puzzle}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-puzzle}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-puzzle}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DJANGO_DEBUG: "True"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-only-not-secret-key}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,0.0.0.0,web
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-puzzle}
+      DATABASE_URL: postgres://${POSTGRES_USER:-puzzle}:${POSTGRES_PASSWORD:-puzzle}@db:5432/${POSTGRES_DB:-puzzle}
+      # Dev serves static via runserver; skip collectstatic.
+      DJANGO_COLLECTSTATIC: "0"
+    volumes:
+      - .:/app          # live code reload
+      - media:/app/media
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  media:

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% load wagtailcore_tags wagtailimages_tags %}
+
+{% block content %}
+  <section class="relative overflow-hidden">
+    {# Animated gradient backdrop #}
+    <div class="pointer-events-none absolute inset-0 -z-10">
+      <div class="absolute -top-24 left-1/4 h-96 w-96 animate-blob rounded-full bg-brand-600/30 blur-3xl"></div>
+      <div class="absolute top-10 right-1/4 h-96 w-96 animate-blob animation-delay-2000 rounded-full bg-accent/20 blur-3xl"></div>
+      <div class="absolute bottom-0 left-1/3 h-96 w-96 animate-blob animation-delay-4000 rounded-full bg-brand-400/20 blur-3xl"></div>
+    </div>
+
+    <div class="mx-auto max-w-7xl px-6 py-24 md:py-32">
+      <div class="grid items-center gap-12 md:grid-cols-2">
+        <div class="animate-fade-up">
+          {% if page.hero_kicker %}
+            <p class="mb-4 inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-500/10 px-4 py-1 text-sm font-medium text-brand-100">
+              ✨ {{ page.hero_kicker }}
+            </p>
+          {% endif %}
+          <h1 class="font-display text-4xl font-bold leading-tight tracking-tight md:text-6xl">
+            {{ page.hero_heading|default:"Unforgettable puzzle experiences" }}
+          </h1>
+          {% if page.hero_subheading %}
+            <p class="mt-6 max-w-lg text-lg text-slate-300">{{ page.hero_subheading }}</p>
+          {% endif %}
+          <div class="mt-8 flex flex-wrap gap-4">
+            {% if page.hero_cta_page and page.hero_cta_label %}
+              <a href="{% pageurl page.hero_cta_page %}"
+                 class="rounded-full bg-brand-500 px-7 py-3 font-semibold text-white shadow-lg shadow-brand-500/30 transition hover:-translate-y-0.5 hover:bg-brand-400">
+                {{ page.hero_cta_label }}
+              </a>
+            {% endif %}
+            <a href="#experiences"
+               class="rounded-full border border-white/15 px-7 py-3 font-semibold text-slate-200 transition hover:border-white/40">
+              See experiences
+            </a>
+          </div>
+        </div>
+
+        <div class="animate-fade-up animation-delay-2000">
+          {% if page.hero_image %}
+            {% image page.hero_image fill-800x800 class="w-full rounded-3xl shadow-2xl shadow-black/40 ring-1 ring-white/10" %}
+          {% else %}
+            <div class="flex aspect-square items-center justify-center rounded-3xl bg-gradient-to-br from-brand-600/40 to-accent/30 text-8xl ring-1 ring-white/10">
+              🧩
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="experiences" class="mx-auto max-w-7xl px-6 pb-24">
+    {% include "cms/includes/stream_body.html" with body=page.body %}
+  </div>
+{% endblock %}

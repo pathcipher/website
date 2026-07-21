@@ -1,0 +1,11 @@
+{% load wagtailcore_tags %}
+<div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-600 to-brand-700 px-8 py-14 text-center shadow-xl shadow-brand-600/20">
+  <div class="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-accent/20 blur-2xl"></div>
+  <h2 class="font-display text-3xl font-bold text-white md:text-4xl">{{ value.heading }}</h2>
+  {% if value.text %}<p class="mx-auto mt-4 max-w-xl text-brand-50">{{ value.text }}</p>{% endif %}
+  {% firstof value.button_page.url value.button_url "#contact" as cta_href %}
+  <a href="{{ cta_href }}"
+     class="mt-8 inline-block rounded-full bg-white px-8 py-3 font-semibold text-brand-700 shadow-lg transition hover:-translate-y-0.5">
+    {{ value.button_label }}
+  </a>
+</div>
