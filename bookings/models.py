@@ -1,10 +1,13 @@
 """
-Bookings domain model for the internal PM tool.
+Events domain model for the internal PM tool.
 
-Core rule: a resource (a Venue or a PuzzleSet) must never be booked for two
-overlapping time windows at once. That rule is enforced in Python via
-``clean()`` / ``full_clean()`` so that admin users get a clear, human-readable
-error — not a raw database IntegrityError.
+Rules enforced in Python (via ``clean()`` / ``full_clean()``) so admin users
+get clear, human-readable errors rather than raw database IntegrityErrors:
+
+1. A resource (a Venue or a Puzzle) must never be booked for two overlapping
+   time windows at once.
+2. A given Puzzle must not be used by more than one event for the same
+   customer.
 """
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -36,6 +39,7 @@ class Venue(models.Model):
     """A bookable location/room."""
 
     name = models.CharField(max_length=200)
+    address = models.TextField(blank=True)
     capacity = models.PositiveIntegerField(null=True, blank=True)
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
@@ -49,10 +53,24 @@ class Venue(models.Model):
         return self.name
 
 
-class PuzzleSet(models.Model):
+class Puzzle(models.Model):
     """A bookable puzzle/prop resource."""
 
     name = models.CharField(max_length=200)
+    flexible_answer = models.BooleanField(
+        default=False,
+        help_text="Whether the puzzle accepts a range of answers rather than "
+                  "one exact solution.",
+    )
+    answer = models.TextField(
+        blank=True,
+        help_text="The puzzle's solution (or accepted answers).",
+    )
+    github_url = models.URLField(
+        blank=True,
+        verbose_name="GitHub link",
+        help_text="Optional link to the puzzle's repository.",
+    )
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
 
@@ -60,13 +78,13 @@ class PuzzleSet(models.Model):
 
     class Meta:
         ordering = ["name"]
-        verbose_name = "Puzzle set"
+        verbose_name = "Puzzle"
 
     def __str__(self):
         return self.name
 
 
-class Booking(models.Model):
+class Event(models.Model):
     class Status(models.TextChoices):
         ENQUIRY = "enquiry", "Enquiry"
         CONFIRMED = "confirmed", "Confirmed"
@@ -74,7 +92,7 @@ class Booking(models.Model):
         COMPLETED = "completed", "Completed"
 
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="bookings"
+        Customer, on_delete=models.PROTECT, related_name="events"
     )
     start = models.DateTimeField()
     end = models.DateTimeField()
@@ -99,7 +117,7 @@ class Booking(models.Model):
 
     @property
     def blocks_resources(self):
-        """Cancelled bookings don't hold their resources."""
+        """Cancelled events don't hold their resources."""
         return self.status != self.Status.CANCELLED
 
     def clean(self):
@@ -110,89 +128,109 @@ class Booking(models.Model):
             )
 
 
-def overlapping_resource_bookings(*, venue=None, puzzle_set=None, start, end,
-                                  exclude_booking_id=None):
+def overlapping_resource_events(*, venue=None, puzzle=None, start, end,
+                                exclude_event_id=None):
     """
-    BookingResource rows that would clash with a [start, end) window for the
-    given resource. A clash is an overlapping window on a booking that still
-    holds its resources (i.e. not cancelled).
+    EventResource rows that would clash with a [start, end) window for the given
+    resource. A clash is an overlapping window on an event that still holds its
+    resources (i.e. not cancelled).
 
     Half-open intervals: touching end-to-start (e.g. 10:00–11:00 then
     11:00–12:00) does NOT count as an overlap.
     """
-    if (venue is None) == (puzzle_set is None):
-        raise ValueError("Provide exactly one of venue or puzzle_set.")
+    if (venue is None) == (puzzle is None):
+        raise ValueError("Provide exactly one of venue or puzzle.")
 
-    qs = BookingResource.objects.select_related("booking", "booking__customer")
+    qs = EventResource.objects.select_related("event", "event__customer")
     if venue is not None:
         qs = qs.filter(venue=venue)
     else:
-        qs = qs.filter(puzzle_set=puzzle_set)
+        qs = qs.filter(puzzle=puzzle)
 
-    qs = qs.exclude(booking__status=Booking.Status.CANCELLED)
+    qs = qs.exclude(event__status=Event.Status.CANCELLED)
     # Overlap test for half-open intervals: a.start < b.end AND b.start < a.end
-    qs = qs.filter(booking__start__lt=end, booking__end__gt=start)
+    qs = qs.filter(event__start__lt=end, event__end__gt=start)
 
-    if exclude_booking_id is not None:
-        qs = qs.exclude(booking_id=exclude_booking_id)
+    if exclude_event_id is not None:
+        qs = qs.exclude(event_id=exclude_event_id)
 
     return qs
 
 
-class BookingResource(models.Model):
+def puzzle_events_for_customer(*, puzzle, customer, exclude_event_id=None):
     """
-    Links a Booking to exactly one resource (a Venue OR a PuzzleSet) it uses.
+    EventResource rows attaching ``puzzle`` to a (non-cancelled) event for
+    ``customer``. Used to stop the same puzzle being reused across a customer's
+    events.
+    """
+    qs = EventResource.objects.select_related("event").filter(
+        puzzle=puzzle, event__customer=customer
+    ).exclude(event__status=Event.Status.CANCELLED)
+    if exclude_event_id is not None:
+        qs = qs.exclude(event_id=exclude_event_id)
+    return qs
 
-    A booking that needs a room and two puzzle sets has three BookingResource
-    rows. The overlap rule is enforced per row in ``clean()``.
+
+class EventResource(models.Model):
+    """
+    Links an Event to exactly one resource (a Venue OR a Puzzle) it uses.
+
+    An event that needs a room and two puzzles has three EventResource rows.
+    The overlap and reuse rules are enforced per row in ``clean()``.
     """
 
-    booking = models.ForeignKey(
-        Booking, on_delete=models.CASCADE, related_name="resources"
+    event = models.ForeignKey(
+        Event, on_delete=models.CASCADE, related_name="resources"
     )
     venue = models.ForeignKey(
         Venue, null=True, blank=True, on_delete=models.PROTECT,
-        related_name="booking_links",
+        related_name="event_links",
     )
-    puzzle_set = models.ForeignKey(
-        PuzzleSet, null=True, blank=True, on_delete=models.PROTECT,
-        related_name="booking_links",
+    puzzle = models.ForeignKey(
+        Puzzle, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="event_links",
+    )
+    allow_reuse = models.BooleanField(
+        default=False,
+        verbose_name="Allow reuse for this customer",
+        help_text="Tick to permit using this puzzle even though it's already "
+                  "used by another event for the same customer.",
     )
 
     class Meta:
-        verbose_name = "Booked resource"
+        verbose_name = "Used resource"
         constraints = [
-            # Exactly one of venue / puzzle_set must be set (DB-level backstop).
+            # Exactly one of venue / puzzle must be set (DB-level backstop).
             models.CheckConstraint(
-                name="bookingresource_exactly_one_resource",
+                name="eventresource_exactly_one_resource",
                 condition=(
-                    models.Q(venue__isnull=False, puzzle_set__isnull=True)
-                    | models.Q(venue__isnull=True, puzzle_set__isnull=False)
+                    models.Q(venue__isnull=False, puzzle__isnull=True)
+                    | models.Q(venue__isnull=True, puzzle__isnull=False)
                 ),
             ),
-            # Don't attach the same resource to a booking twice.
+            # Don't attach the same resource to an event twice.
             models.UniqueConstraint(
-                fields=["booking", "venue"],
+                fields=["event", "venue"],
                 condition=models.Q(venue__isnull=False),
-                name="uniq_booking_venue",
+                name="uniq_event_venue",
             ),
             models.UniqueConstraint(
-                fields=["booking", "puzzle_set"],
-                condition=models.Q(puzzle_set__isnull=False),
-                name="uniq_booking_puzzle_set",
+                fields=["event", "puzzle"],
+                condition=models.Q(puzzle__isnull=False),
+                name="uniq_event_puzzle",
             ),
         ]
 
     @property
     def resource(self):
-        return self.venue or self.puzzle_set
+        return self.venue or self.puzzle
 
     @property
     def resource_label(self):
         if self.venue_id:
             return f"Venue: {self.venue}"
-        if self.puzzle_set_id:
-            return f"Puzzle set: {self.puzzle_set}"
+        if self.puzzle_id:
+            return f"Puzzle: {self.puzzle}"
         return "—"
 
     def __str__(self):
@@ -202,38 +240,59 @@ class BookingResource(models.Model):
         super().clean()
 
         # Exactly one resource must be chosen.
-        if bool(self.venue_id) == bool(self.puzzle_set_id):
+        if bool(self.venue_id) == bool(self.puzzle_id):
             raise ValidationError(
-                "Choose exactly one resource: either a venue or a puzzle set."
+                "Choose exactly one resource: either a venue or a puzzle."
             )
 
-        # We can only check overlaps once we know which booking (and therefore
-        # which time window) this row belongs to. During admin inline creation
-        # the parent may not be attached yet — the inline formset performs the
-        # authoritative check in that case (see bookings/admin.py).
-        booking = self.booking if self.booking_id else None
-        if not booking or not booking.start or not booking.end:
+        # We can only check the cross-event rules once we know which event (and
+        # therefore which time window / customer) this row belongs to. During
+        # admin inline creation the parent may not be attached yet — the inline
+        # formset performs the authoritative check in that case (see admin.py).
+        event = self.event if self.event_id else None
+        if not event or not event.start or not event.end:
             return
-        if not booking.blocks_resources:
-            return  # cancelled bookings don't reserve anything
+        if not event.blocks_resources:
+            return  # cancelled events don't reserve anything
 
-        clashes = overlapping_resource_bookings(
+        # Rule 1: no overlapping time window for the same resource.
+        clashes = overlapping_resource_events(
             venue=self.venue if self.venue_id else None,
-            puzzle_set=self.puzzle_set if self.puzzle_set_id else None,
-            start=booking.start,
-            end=booking.end,
-            exclude_booking_id=booking.id,
+            puzzle=self.puzzle if self.puzzle_id else None,
+            start=event.start,
+            end=event.end,
+            exclude_event_id=event.id,
         ).exclude(pk=self.pk)
 
         first = clashes.first()
         if first is not None:
-            other = first.booking
+            other = first.event
             raise ValidationError(
                 "{res} is already booked for an overlapping time "
-                "({start} – {end}) by booking “{other}”.".format(
+                "({start} – {end}) by event “{other}”.".format(
                     res=self.resource_label,
                     start=timezone.localtime(other.start).strftime("%d %b %H:%M"),
                     end=timezone.localtime(other.end).strftime("%d %b %H:%M"),
                     other=other,
                 )
             )
+
+        # Rule 2: a puzzle must not be reused across a customer's events.
+        # This is a soft rule — tick ``allow_reuse`` to override it.
+        if self.puzzle_id and not self.allow_reuse:
+            reused = puzzle_events_for_customer(
+                puzzle=self.puzzle,
+                customer=event.customer,
+                exclude_event_id=event.id,
+            ).exclude(pk=self.pk)
+            dup = reused.first()
+            if dup is not None:
+                raise ValidationError(
+                    "Puzzle “{puzzle}” is already used by another event for "
+                    "{customer} ({other}). A puzzle can only be used once per "
+                    "customer.".format(
+                        puzzle=self.puzzle,
+                        customer=event.customer,
+                        other=dup.event,
+                    )
+                )

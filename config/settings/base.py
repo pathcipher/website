@@ -180,9 +180,9 @@ UNFOLD = {
                 "separator": True,
                 "items": [
                     {
-                        "title": "Bookings",
+                        "title": "Events",
                         "icon": "event",
-                        "link": "/admin/bookings/booking/",
+                        "link": "/admin/bookings/event/",
                     },
                     {
                         "title": "Customers",
@@ -195,9 +195,9 @@ UNFOLD = {
                         "link": "/admin/bookings/venue/",
                     },
                     {
-                        "title": "Puzzle sets",
+                        "title": "Puzzles",
                         "icon": "extension",
-                        "link": "/admin/bookings/puzzleset/",
+                        "link": "/admin/bookings/puzzle/",
                     },
                 ],
             },

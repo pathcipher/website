@@ -1,15 +1,14 @@
 """
 Admin configuration for the internal PM tool, skinned with django-unfold.
 
-The venue/puzzle-set double-booking rule is enforced in two complementary
-places:
+Two cross-event rules are enforced in two complementary places each — the
+model ``clean()`` (see models.py, also covers programmatic/API use) and the
+admin inline formset here (authoritative for the UI, because it sees the
+event's *edited* start/end/customer and all resource rows submitted together,
+including on a brand-new event that has no primary key yet):
 
-* ``BookingResource.clean()`` — the model-level rule (see models.py), which
-  also protects programmatic/API use and existing-booking edits.
-* ``BookingResourceInlineFormSet.clean()`` here — the authoritative check for
-  the admin UI, because it can see the booking's *edited* start/end and the
-  full set of resource rows being submitted together (including new ones on a
-  brand-new booking that has no primary key yet).
+* a Venue/Puzzle must not be double-booked for overlapping time windows;
+* a Puzzle must not be reused across a customer's events.
 """
 from django.contrib import admin
 from django.core.exceptions import ValidationError
@@ -20,29 +19,31 @@ from django.utils.html import format_html
 from unfold.admin import ModelAdmin, TabularInline
 
 from .models import (
-    Booking,
-    BookingResource,
     Customer,
-    PuzzleSet,
+    Event,
+    EventResource,
+    Puzzle,
     Venue,
-    overlapping_resource_bookings,
+    overlapping_resource_events,
+    puzzle_events_for_customer,
 )
 
 
-class BookingResourceInlineFormSet(BaseInlineFormSet):
-    """Validate the whole set of resources against the booking's edited window."""
+class EventResourceInlineFormSet(BaseInlineFormSet):
+    """Validate the whole set of resources against the event's edited fields."""
 
     def clean(self):
         super().clean()
-        booking = self.instance
+        event = self.instance
 
-        start = getattr(booking, "start", None)
-        end = getattr(booking, "end", None)
+        start = getattr(event, "start", None)
+        end = getattr(event, "end", None)
+        customer = getattr(event, "customer", None)
         if not start or not end:
             return  # parent form already errored on the missing/invalid window
 
-        # Cancelled bookings release their resources — nothing to guard.
-        if getattr(booking, "status", None) == Booking.Status.CANCELLED:
+        # Cancelled events release their resources — nothing to guard.
+        if getattr(event, "status", None) == Event.Status.CANCELLED:
             return
 
         seen = set()
@@ -54,31 +55,31 @@ class BookingResourceInlineFormSet(BaseInlineFormSet):
                 continue
 
             venue = cd.get("venue")
-            puzzle_set = cd.get("puzzle_set")
-            if bool(venue) == bool(puzzle_set):
+            puzzle = cd.get("puzzle")
+            if bool(venue) == bool(puzzle):
                 continue  # exactly-one rule reported at the row level
 
-            key = ("venue", venue.pk) if venue else ("puzzle", puzzle_set.pk)
+            key = ("venue", venue.pk) if venue else ("puzzle", puzzle.pk)
             if key in seen:
                 raise ValidationError(
-                    "The same resource is attached to this booking twice."
+                    "The same resource is attached to this event twice."
                 )
             seen.add(key)
 
-            clashes = overlapping_resource_bookings(
+            # Rule 1: overlapping time window for the same resource.
+            clashes = overlapping_resource_events(
                 venue=venue if venue else None,
-                puzzle_set=puzzle_set if puzzle_set else None,
+                puzzle=puzzle if puzzle else None,
                 start=start,
                 end=end,
-                exclude_booking_id=booking.pk,
+                exclude_event_id=event.pk,
             )
             if form.instance.pk:
                 clashes = clashes.exclude(pk=form.instance.pk)
-
             clash = clashes.first()
             if clash is not None:
-                other = clash.booking
-                label = f"Venue “{venue}”" if venue else f"Puzzle set “{puzzle_set}”"
+                other = clash.event
+                label = f"Venue “{venue}”" if venue else f"Puzzle “{puzzle}”"
                 raise ValidationError(
                     format_html(
                         "{} is already booked for an overlapping window "
@@ -90,52 +91,80 @@ class BookingResourceInlineFormSet(BaseInlineFormSet):
                     )
                 )
 
+            # Rule 2: a puzzle must not be reused across a customer's events.
+            # Soft rule — the row's "allow reuse" checkbox overrides it.
+            if puzzle and customer and not cd.get("allow_reuse"):
+                reused = puzzle_events_for_customer(
+                    puzzle=puzzle, customer=customer, exclude_event_id=event.pk
+                )
+                if form.instance.pk:
+                    reused = reused.exclude(pk=form.instance.pk)
+                dup = reused.first()
+                if dup is not None:
+                    raise ValidationError(
+                        format_html(
+                            "Puzzle “{}” is already used by another event for "
+                            "{} (“{}”). A puzzle can only be used once per "
+                            "customer.",
+                            str(puzzle), str(customer), str(dup.event),
+                        )
+                    )
 
-class BookingResourceInline(TabularInline):
-    model = BookingResource
-    formset = BookingResourceInlineFormSet
+
+class EventResourceInline(TabularInline):
+    model = EventResource
+    formset = EventResourceInlineFormSet
     extra = 1
-    autocomplete_fields = ["venue", "puzzle_set"]
-    verbose_name = "Booked resource"
-    verbose_name_plural = "Booked resources (one venue or puzzle set per row)"
+    fields = ["venue", "puzzle", "allow_reuse"]
+    autocomplete_fields = ["venue", "puzzle"]
+    verbose_name = "Used resource"
+    verbose_name_plural = "Resources used (one venue or puzzle per row)"
 
 
 @admin.register(Customer)
 class CustomerAdmin(ModelAdmin):
-    list_display = ["name", "email", "phone", "booking_count"]
+    list_display = ["name", "email", "phone", "event_count"]
     search_fields = ["name", "email", "phone"]
     list_filter = ["created_at"]
 
-    @admin.display(description="Bookings")
-    def booking_count(self, obj):
-        return obj.bookings.count()
+    @admin.display(description="Events")
+    def event_count(self, obj):
+        return obj.events.count()
 
 
 @admin.register(Venue)
 class VenueAdmin(ModelAdmin):
     list_display = ["name", "capacity", "is_active"]
     list_filter = ["is_active"]
-    search_fields = ["name"]
+    search_fields = ["name", "address"]
+    fields = ["name", "address", "capacity", "notes", "is_active"]
 
 
-@admin.register(PuzzleSet)
-class PuzzleSetAdmin(ModelAdmin):
-    list_display = ["name", "is_active"]
-    list_filter = ["is_active"]
-    search_fields = ["name"]
+@admin.register(Puzzle)
+class PuzzleAdmin(ModelAdmin):
+    list_display = ["name", "flexible_answer", "has_github", "is_active"]
+    list_filter = ["is_active", "flexible_answer"]
+    search_fields = ["name", "answer"]
+    fields = [
+        "name", "flexible_answer", "answer", "github_url", "notes", "is_active",
+    ]
+
+    @admin.display(description="GitHub", boolean=True)
+    def has_github(self, obj):
+        return bool(obj.github_url)
 
 
 STATUS_COLOURS = {
-    Booking.Status.ENQUIRY: "#a16207",    # amber
-    Booking.Status.CONFIRMED: "#15803d",  # green
-    Booking.Status.CANCELLED: "#b91c1c",  # red
-    Booking.Status.COMPLETED: "#4338ca",  # indigo
+    Event.Status.ENQUIRY: "#a16207",    # amber
+    Event.Status.CONFIRMED: "#15803d",  # green
+    Event.Status.CANCELLED: "#b91c1c",  # red
+    Event.Status.COMPLETED: "#4338ca",  # indigo
 }
 
 
-@admin.register(Booking)
-class BookingAdmin(ModelAdmin):
-    inlines = [BookingResourceInline]
+@admin.register(Event)
+class EventAdmin(ModelAdmin):
+    inlines = [EventResourceInline]
     date_hierarchy = "start"
     list_display = ["customer", "start", "end", "status_badge", "resource_summary"]
     list_filter = ["status", "start"]
@@ -160,5 +189,5 @@ class BookingAdmin(ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).prefetch_related(
-            "resources__venue", "resources__puzzle_set"
+            "resources__venue", "resources__puzzle"
         )
