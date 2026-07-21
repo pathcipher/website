@@ -1,6 +1,6 @@
 # Core framework
-Django==5.1.15
-wagtail==6.3.8
+Django==5.2.16
+wagtail==7.4.2
 
 # Admin skin
 django-unfold==0.91.0
