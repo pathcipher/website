@@ -143,7 +143,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
 # --- Wagtail ---
-WAGTAIL_SITE_NAME = env("WAGTAIL_SITE_NAME", default="Puzzle Team")
+WAGTAIL_SITE_NAME = env("WAGTAIL_SITE_NAME", default="Pathcipher Events")
 WAGTAILADMIN_BASE_URL = env("WAGTAILADMIN_BASE_URL", default="http://localhost:8000")
 WAGTAILDOCS_EXTENSIONS = [
     "csv", "docx", "key", "odt", "pdf", "pptx", "rtf", "txt", "xlsx", "zip",
@@ -158,17 +158,18 @@ WAGTAILSEARCH_BACKENDS = {
 
 # --- django-unfold (admin skin) ---
 UNFOLD = {
-    "SITE_TITLE": "Puzzle Team — Ops",
-    "SITE_HEADER": "Puzzle Team Ops",
+    "SITE_TITLE": "Pathcipher — Ops",
+    "SITE_HEADER": "Pathcipher Ops",
     "SITE_SUBHEADER": "Bookings & resources",
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": False,
     "COLORS": {
+        # Pathcipher teal.
         "primary": {
-            "50": "238 242 255", "100": "224 231 255", "200": "199 210 254",
-            "300": "165 180 252", "400": "129 140 248", "500": "99 102 241",
-            "600": "79 70 229", "700": "67 56 202", "800": "55 48 163",
-            "900": "49 46 129", "950": "30 27 75",
+            "50": "230 244 241", "100": "193 227 221", "200": "151 209 199",
+            "300": "102 188 174", "400": "51 164 147", "500": "19 130 117",
+            "600": "15 106 95", "700": "0 104 91", "800": "8 59 52",
+            "900": "4 35 31", "950": "2 20 18",
         },
     },
     "SIDEBAR": {

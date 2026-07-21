@@ -1,37 +1,38 @@
 {% load navigation_tags %}
-<footer id="contact" class="border-t border-white/5 bg-surface/40">
+<footer id="contact" class="border-t border-slate-200 bg-surface">
   <div class="mx-auto grid max-w-7xl gap-10 px-6 py-14 md:grid-cols-3">
     <div>
-      <div class="flex items-center gap-2 font-display text-lg font-bold">
-        <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-accent text-ink">🧩</span>
+      <div class="flex items-center gap-2 font-display text-lg font-bold text-ink">
+        <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-white">🧩</span>
         {{ SITE_NAME }}
       </div>
-      <p class="mt-4 max-w-xs text-sm text-slate-400">
-        Live puzzle experiences and escape rooms for teams, parties and events.
+      <p class="mt-4 max-w-xs text-sm text-slate-500">
+        Immersive puzzle experiences designed to challenge minds, build trust,
+        and spark creativity.
       </p>
     </div>
 
     <div>
-      <h3 class="font-display text-sm font-semibold uppercase tracking-wider text-slate-400">Explore</h3>
+      <h3 class="font-display text-sm font-bold uppercase tracking-wider text-brand-700">Explore</h3>
       <div class="mt-4 flex flex-col gap-2">
         {% main_menu %}
       </div>
     </div>
 
     <div>
-      <h3 class="font-display text-sm font-semibold uppercase tracking-wider text-slate-400">Get in touch</h3>
-      <p class="mt-4 text-sm text-slate-400">
-        Ready to book or have a question? We'd love to hear from you.
+      <h3 class="font-display text-sm font-bold uppercase tracking-wider text-brand-700">Get in touch</h3>
+      <p class="mt-4 text-sm text-slate-500">
+        Ready to plan your event or have a question? We'd love to hear from you.
       </p>
       <a
-        href="mailto:hello@example.com"
-        class="mt-4 inline-block rounded-full border border-brand-500/40 px-5 py-2 text-sm font-semibold text-brand-100 transition hover:bg-brand-500/10"
+        href="/contact"
+        class="mt-4 inline-block rounded-full bg-brand-500 px-5 py-2 text-sm font-bold text-white transition hover:bg-brand-600"
       >
         Contact us
       </a>
     </div>
   </div>
-  <div class="border-t border-white/5 px-6 py-6 text-center text-xs text-slate-500">
+  <div class="border-t border-slate-200 px-6 py-6 text-center text-xs text-slate-400">
     &copy; {% now "Y" %} {{ SITE_NAME }}. All rights reserved.
   </div>
 </footer>

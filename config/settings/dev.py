@@ -24,8 +24,10 @@ STORAGES["staticfiles"] = {  # noqa: F405
     "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
 }
 
-# Flag consumed by templates to load Tailwind via CDN in dev.
-TAILWIND_CDN = True
+# By default dev uses the same compiled Tailwind stylesheet as prod, so the
+# site is styled offline with no external CDN. Set DJANGO_TAILWIND_CDN=True to
+# use the Play CDN instead for quick prototyping (needs cdn.tailwindcss.com).
+TAILWIND_CDN = env.bool("DJANGO_TAILWIND_CDN", default=False)
 
 try:
     from .local import *  # noqa: F401,F403

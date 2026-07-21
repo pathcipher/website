@@ -1,11 +1,9 @@
 {% load navigation_tags wagtailcore_tags %}
-<header class="sticky top-0 z-40 border-b border-white/5 bg-ink/80 backdrop-blur">
+<header class="sticky top-0 z-40 border-b border-slate-200 bg-white/85 backdrop-blur">
   <nav class="mx-auto flex max-w-7xl items-center justify-between gap-6 px-6 py-4">
-    <a href="/" class="group flex items-center gap-2 font-display text-lg font-bold tracking-tight">
-      <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-accent text-ink">🧩</span>
-      <span class="bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
-        {{ SITE_NAME }}
-      </span>
+    <a href="/" class="group flex items-center gap-2 font-display text-lg font-bold tracking-tight text-ink">
+      <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-white">🧩</span>
+      <span>{{ SITE_NAME }}</span>
     </a>
 
     <div class="hidden items-center gap-8 md:flex">
@@ -13,14 +11,14 @@
     </div>
 
     <a
-      href="#contact"
-      class="hidden rounded-full bg-brand-500 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition hover:bg-brand-400 md:inline-block"
+      href="/contact"
+      class="hidden rounded-full bg-brand-500 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-brand-500/25 transition hover:bg-brand-600 md:inline-block"
     >
-      Book now
+      Contact us
     </a>
 
     <button
-      class="md:hidden"
+      class="md:hidden text-ink"
       aria-label="Toggle menu"
       onclick="document.getElementById('mobile-menu').classList.toggle('hidden')"
     >
@@ -30,7 +28,7 @@
     </button>
   </nav>
 
-  <div id="mobile-menu" class="hidden border-t border-white/5 px-6 py-4 md:hidden">
+  <div id="mobile-menu" class="hidden border-t border-slate-200 px-6 py-4 md:hidden">
     {% main_menu %}
   </div>
 </header>

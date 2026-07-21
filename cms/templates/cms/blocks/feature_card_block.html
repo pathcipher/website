@@ -1,10 +1,10 @@
 {% load wagtailimages_tags %}
-<div class="group rounded-2xl border border-white/10 bg-surface/60 p-6 transition hover:-translate-y-1 hover:border-brand-500/40">
+<div class="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg">
   {% if value.image %}
     {% image value.image fill-600x360 class="mb-4 w-full rounded-xl" %}
   {% elif value.icon_emoji %}
-    <div class="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-brand-500/15 text-2xl">{{ value.icon_emoji }}</div>
+    <div class="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-2xl">{{ value.icon_emoji }}</div>
   {% endif %}
-  <h3 class="font-display text-lg font-semibold text-white">{{ value.title }}</h3>
-  {% if value.body %}<p class="mt-2 text-sm text-slate-400">{{ value.body }}</p>{% endif %}
+  <h3 class="font-display text-lg font-bold text-ink">{{ value.title }}</h3>
+  {% if value.body %}<p class="mt-2 text-sm text-slate-500">{{ value.body }}</p>{% endif %}
 </div>

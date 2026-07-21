@@ -1,3 +1,7 @@
+# Node (Tailwind build tooling)
+node_modules/
+npm-debug.log*
+
 # Python
 __pycache__/
 *.py[cod]
