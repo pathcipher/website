@@ -16,7 +16,7 @@ Let's Encrypt TLS, via Docker Compose.
 | Concern            | Choice                                             |
 | ------------------ | -------------------------------------------------- |
 | Language/framework | Python 3.12, Django 5.1                            |
-| CMS + public site  | Wagtail 6.3, Django templates + Tailwind (CDN) + htmx |
+| CMS + public site  | Wagtail 6.3, Django templates + Tailwind (compiled) + htmx |
 | Admin / PM tool    | Django admin skinned with django-unfold            |
 | Database           | PostgreSQL 16 (single instance, shared)            |
 | Reverse proxy/TLS  | nginx + certbot (Let's Encrypt, auto-renew)        |
@@ -76,6 +76,22 @@ python manage.py runserver
 ```
 
 With no `DATABASE_URL` set, dev falls back to a local `db.sqlite3`.
+
+## Front-end CSS (Tailwind)
+
+Styling is a **compiled, vendored** Tailwind stylesheet
+(`static/css/tailwind.build.css`) — no runtime CDN, so the site is fully
+self-contained. The brand theme (Pathcipher teal, Lato) lives in
+`tailwind.config.js`. Rebuild it after changing template classes:
+
+```bash
+npm install          # once
+npm run build:css    # or: npm run watch:css  (rebuild on save)
+```
+
+`config.settings.dev` uses the compiled sheet too, so dev is styled offline.
+For quick prototyping you can opt into the Tailwind Play CDN with
+`DJANGO_TAILWIND_CDN=True` (needs `cdn.tailwindcss.com` reachable).
 
 ## The double-booking rule (the important bit)
 
@@ -140,16 +156,14 @@ gitignored too.
 
 ## Notes / next steps
 
-- **Styling is intentionally brand-neutral** (placeholder indigo/cyan palette,
-  Space Grotesk + Inter). Swap the palette in `templates/base.html`
-  (`tailwind.config`) and `UNFOLD["COLORS"]` in `config/settings/base.py` for
-  the real pathcipher.co.uk brand once assets are available.
-- Tailwind is loaded via the Play CDN (no build pipeline, per brief). For
-  maximum production performance you can later compile a static stylesheet and
-  set `TAILWIND_CDN=False`.
+- **The public site follows the Pathcipher brand** (teal `#138275` on light,
+  mint accent, Lato) with the site's own copy. Tweak the palette in
+  `tailwind.config.js` (+ the CDN mirror in `templates/base.html`) and
+  `UNFOLD["COLORS"]` in `config/settings/base.py`. Real page copy is seeded by
+  `python manage.py seed_site` and fully editable in the Wagtail CMS.
 - Suggested polish (per the brief's build order): a calendar view of bookings
-  in the admin, richer public-site animation, a contact form (Wagtail form
-  page).
+  in the admin, a working contact form (Wagtail form page), and real imagery
+  from the brand.
 - The Docker image/stack is config-validated; build & run it on a machine with
   a running Docker daemon.
 ```
