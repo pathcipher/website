@@ -36,7 +36,7 @@ Let's Encrypt TLS, via Docker Compose.
 ├── config/                 # Django project (settings split, urls, wsgi/asgi)
 │   └── settings/           # base.py, dev.py, prod.py
 ├── cms/                    # Wagtail app: pages, StreamField blocks, seed command
-├── bookings/               # Customers, Bookings, Venues, PuzzleSets + overlap rule
+├── bookings/               # Customers, Events, Venues, Puzzles + overlap rule
 ├── templates/              # base.html, header/footer includes
 ├── static/css/site.css     # custom animations layered on Tailwind
 ├── docker/entrypoint.sh    # wait-for-db, migrate, seed, collectstatic, gunicorn
@@ -93,25 +93,45 @@ npm run build:css    # or: npm run watch:css  (rebuild on save)
 For quick prototyping you can opt into the Tailwind Play CDN with
 `DJANGO_TAILWIND_CDN=True` (needs `cdn.tailwindcss.com` reachable).
 
-## The double-booking rule (the important bit)
+## The bookings domain (the important bit)
 
-A `Venue` or `PuzzleSet` must never be booked for two overlapping time windows.
-This is enforced **in Python via model validation** (not only a DB constraint),
-so admin users get a clear, readable error:
+An `Event` belongs to a `Customer`, has exactly one `Venue` (a direct field,
+not a many-to-many), and uses any number of `Puzzle`s via the `EventPuzzle`
+join (with a "count of puzzles" column on the events list). All overlap/reuse
+rules are enforced **in Python via model validation** (not only a DB
+constraint), so admin users get a clear, readable error, using half-open
+intervals throughout (10:00–11:00 and 11:00–12:00 do **not** clash):
 
-- `BookingResource.clean()` — the model-level rule (also covers programmatic
-  and existing-booking edits). Uses half-open intervals, so 10:00–11:00 and
-  11:00–12:00 do **not** clash.
-- `BookingResourceInlineFormSet.clean()` (in `bookings/admin.py`) — the
-  authoritative check for the admin UI, because it sees the booking's *edited*
-  start/end and all resource rows submitted together (including on a brand-new
-  booking with no primary key yet).
-- Cancelled bookings release their resources and don't block others.
+- **Venue double-booking** — `Event.clean()`. A venue can't host two
+  overlapping (non-cancelled) events.
+- **Physical-puzzle double-booking** — `EventPuzzle.clean()`. A `Puzzle` with
+  `has_physical_components=True` can't be used by two overlapping events (its
+  props can only be in one place at once). Puzzles without physical
+  components (purely online) have no such limit.
+- **Puzzle reuse across a customer's events** — `EventPuzzle.clean()`, a
+  *soft* rule: a repeat customer normally shouldn't get the same puzzle twice
+  (answer/narrative spoiling). Tick **"Allow reuse for this customer"** on the
+  row to override it — and that override automatically propagates to the
+  *other* conflicting event's row too (`EventPuzzle.save()`), so re-opening
+  and re-saving that other event doesn't re-trigger the same conflict from
+  its side.
+- `EventPuzzleInlineFormSet.clean()` (in `bookings/admin.py`) mirrors the
+  puzzle rules for the admin UI, since it sees the event's *edited* start/end
+  and all puzzle rows submitted together, including on a brand-new event with
+  no primary key yet. The venue rule is a plain model field, so it surfaces as
+  a normal "venue" field error via Django's standard form validation.
+- Cancelled events release their venue/puzzles and don't block others.
+
+A `Puzzle` also has an `answer_restrictions` flag (warning shown in the list
+if the puzzle needs one exact answer; a tick if it accepts a flexible range),
+`hardware_required` (free text, one item per line), tags, an optional GitHub
+link, and arbitrary file attachments (props lists, artwork, etc. via the
+`PuzzleFile` inline).
 
 Run the tests:
 
 ```bash
-python manage.py test          # 9 tests, incl. an admin-POST overlap test
+python manage.py test          # 23 tests, incl. admin-POST and override-propagation cases
 ```
 
 ## Production deployment (single VPS)

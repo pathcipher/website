@@ -4,14 +4,22 @@ Events domain model for the internal PM tool.
 Rules enforced in Python (via ``clean()`` / ``full_clean()``) so admin users
 get clear, human-readable errors rather than raw database IntegrityErrors:
 
-1. A resource (a Venue or a Puzzle) must never be booked for two overlapping
-   time windows at once.
-2. A given Puzzle must not be used by more than one event for the same
-   customer.
+1. A Venue must never be double-booked for overlapping time windows
+   (an Event has exactly one venue).
+2. A Puzzle with physical components must never be used by two overlapping
+   events at once (online-only puzzles have no such limit — they can run
+   at multiple events simultaneously).
+3. A given Puzzle should not normally be used by more than one event for the
+   same customer (answer/narrative spoiling) — a soft rule, overridable via
+   ``EventPuzzle.allow_reuse``.
 """
+import os
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
+
+from taggit.managers import TaggableManager
 
 
 class Customer(models.Model):
@@ -30,13 +38,13 @@ class Customer(models.Model):
         return self.name
 
 
-class ResourceQuerySet(models.QuerySet):
+class VenueQuerySet(models.QuerySet):
     def active(self):
         return self.filter(is_active=True)
 
 
 class Venue(models.Model):
-    """A bookable location/room."""
+    """A bookable location/room. An event has exactly one venue."""
 
     name = models.CharField(max_length=200)
     address = models.TextField(blank=True)
@@ -44,7 +52,7 @@ class Venue(models.Model):
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
 
-    objects = ResourceQuerySet.as_manager()
+    objects = VenueQuerySet.as_manager()
 
     class Meta:
         ordering = ["name"]
@@ -53,28 +61,45 @@ class Venue(models.Model):
         return self.name
 
 
+def puzzle_file_upload_to(instance, filename):
+    return f"puzzle_files/{instance.puzzle_id}/{filename}"
+
+
 class Puzzle(models.Model):
-    """A bookable puzzle/prop resource."""
+    """
+    A puzzle used in events. May involve physical props/kit, or be purely
+    online — that distinction drives whether it can be double-booked.
+    """
 
     name = models.CharField(max_length=200)
-    flexible_answer = models.BooleanField(
+    has_physical_components = models.BooleanField(
+        default=True,
+        help_text="Tick if this puzzle involves physical props/kit that can "
+                  "only be in one place at a time. Untick for online-only "
+                  "puzzles, which can run at multiple events simultaneously.",
+    )
+    answer_restrictions = models.BooleanField(
         default=False,
-        help_text="Whether the puzzle accepts a range of answers rather than "
-                  "one exact solution.",
+        verbose_name="Answer restrictions",
+        help_text="Tick if the puzzle requires one exact answer. Leave "
+                  "unticked if it accepts a flexible range of answers.",
     )
     answer = models.TextField(
         blank=True,
         help_text="The puzzle's solution (or accepted answers).",
+    )
+    hardware_required = models.TextField(
+        blank=True,
+        verbose_name="Hardware required",
+        help_text="One item per line.",
     )
     github_url = models.URLField(
         blank=True,
         verbose_name="GitHub link",
         help_text="Optional link to the puzzle's repository.",
     )
+    tags = TaggableManager(blank=True)
     notes = models.TextField(blank=True)
-    is_active = models.BooleanField(default=True)
-
-    objects = ResourceQuerySet.as_manager()
 
     class Meta:
         ordering = ["name"]
@@ -82,6 +107,27 @@ class Puzzle(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def hardware_required_list(self):
+        return [
+            line.strip() for line in self.hardware_required.splitlines()
+            if line.strip()
+        ]
+
+
+class PuzzleFile(models.Model):
+    """An arbitrary file attached to a puzzle (props list, artwork, PDF, ...)."""
+
+    puzzle = models.ForeignKey(Puzzle, on_delete=models.CASCADE, related_name="files")
+    file = models.FileField(upload_to=puzzle_file_upload_to)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+
+    def __str__(self):
+        return os.path.basename(self.file.name)
 
 
 class Event(models.Model):
@@ -91,8 +137,13 @@ class Event(models.Model):
         CANCELLED = "cancelled", "Cancelled"
         COMPLETED = "completed", "Completed"
 
+    name = models.CharField(max_length=200)
     customer = models.ForeignKey(
         Customer, on_delete=models.PROTECT, related_name="events"
+    )
+    venue = models.ForeignKey(
+        Venue, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="events",
     )
     start = models.DateTimeField()
     end = models.DateTimeField()
@@ -113,11 +164,11 @@ class Event(models.Model):
 
     def __str__(self):
         when = timezone.localtime(self.start).strftime("%d %b %Y %H:%M") if self.start else "?"
-        return f"{self.customer} — {when} ({self.get_status_display()})"
+        return f"{self.name} ({when})"
 
     @property
     def blocks_resources(self):
-        """Cancelled events don't hold their resources."""
+        """Cancelled events don't hold their venue/puzzles."""
         return self.status != self.Status.CANCELLED
 
     def clean(self):
@@ -127,43 +178,63 @@ class Event(models.Model):
                 {"end": "End time must be after the start time."}
             )
 
+        if self.venue_id and self.start and self.end and self.blocks_resources:
+            clash = overlapping_venue_events(
+                venue_id=self.venue_id, start=self.start, end=self.end,
+                exclude_event_id=self.pk,
+            ).first()
+            if clash is not None:
+                raise ValidationError({
+                    "venue": "{venue} is already booked for an overlapping "
+                    "time ({start} – {end}) by “{other}”.".format(
+                        venue=self.venue,
+                        start=timezone.localtime(clash.start).strftime("%d %b %H:%M"),
+                        end=timezone.localtime(clash.end).strftime("%d %b %H:%M"),
+                        other=clash,
+                    )
+                })
 
-def overlapping_resource_events(*, venue=None, puzzle=None, start, end,
-                                exclude_event_id=None):
+
+def overlapping_venue_events(*, venue_id, start, end, exclude_event_id=None):
     """
-    EventResource rows that would clash with a [start, end) window for the given
-    resource. A clash is an overlapping window on an event that still holds its
-    resources (i.e. not cancelled).
-
-    Half-open intervals: touching end-to-start (e.g. 10:00–11:00 then
-    11:00–12:00) does NOT count as an overlap.
+    Events that would clash with a [start, end) window at the given venue. A
+    clash is an overlapping window on an event that still holds its venue
+    (i.e. not cancelled). Half-open intervals: touching end-to-start does not
+    count as an overlap.
     """
-    if (venue is None) == (puzzle is None):
-        raise ValueError("Provide exactly one of venue or puzzle.")
+    qs = Event.objects.filter(venue_id=venue_id).exclude(
+        status=Event.Status.CANCELLED
+    ).filter(start__lt=end, end__gt=start)
+    if exclude_event_id is not None:
+        qs = qs.exclude(pk=exclude_event_id)
+    return qs
 
-    qs = EventResource.objects.select_related("event", "event__customer")
-    if venue is not None:
-        qs = qs.filter(venue=venue)
-    else:
-        qs = qs.filter(puzzle=puzzle)
 
-    qs = qs.exclude(event__status=Event.Status.CANCELLED)
-    # Overlap test for half-open intervals: a.start < b.end AND b.start < a.end
+def overlapping_puzzle_events(*, puzzle, start, end, exclude_event_id=None):
+    """
+    EventPuzzle rows that would clash with a [start, end) window for a puzzle
+    with physical components (online-only puzzles have no capacity limit, so
+    they can never clash).
+    """
+    if not puzzle.has_physical_components:
+        return EventPuzzle.objects.none()
+
+    qs = EventPuzzle.objects.select_related("event", "event__customer").filter(
+        puzzle=puzzle
+    ).exclude(event__status=Event.Status.CANCELLED)
     qs = qs.filter(event__start__lt=end, event__end__gt=start)
-
     if exclude_event_id is not None:
         qs = qs.exclude(event_id=exclude_event_id)
-
     return qs
 
 
 def puzzle_events_for_customer(*, puzzle, customer, exclude_event_id=None):
     """
-    EventResource rows attaching ``puzzle`` to a (non-cancelled) event for
-    ``customer``. Used to stop the same puzzle being reused across a customer's
-    events.
+    EventPuzzle rows attaching ``puzzle`` to a (non-cancelled) event for
+    ``customer``. Used to stop the same puzzle being reused across a
+    customer's events.
     """
-    qs = EventResource.objects.select_related("event").filter(
+    qs = EventPuzzle.objects.select_related("event").filter(
         puzzle=puzzle, event__customer=customer
     ).exclude(event__status=Event.Status.CANCELLED)
     if exclude_event_id is not None:
@@ -171,24 +242,14 @@ def puzzle_events_for_customer(*, puzzle, customer, exclude_event_id=None):
     return qs
 
 
-class EventResource(models.Model):
-    """
-    Links an Event to exactly one resource (a Venue OR a Puzzle) it uses.
-
-    An event that needs a room and two puzzles has three EventResource rows.
-    The overlap and reuse rules are enforced per row in ``clean()``.
-    """
+class EventPuzzle(models.Model):
+    """A puzzle used by an event. An event can use many puzzles."""
 
     event = models.ForeignKey(
-        Event, on_delete=models.CASCADE, related_name="resources"
-    )
-    venue = models.ForeignKey(
-        Venue, null=True, blank=True, on_delete=models.PROTECT,
-        related_name="event_links",
+        Event, on_delete=models.CASCADE, related_name="event_puzzles"
     )
     puzzle = models.ForeignKey(
-        Puzzle, null=True, blank=True, on_delete=models.PROTECT,
-        related_name="event_links",
+        Puzzle, on_delete=models.PROTECT, related_name="event_links"
     )
     allow_reuse = models.BooleanField(
         default=False,
@@ -198,101 +259,70 @@ class EventResource(models.Model):
     )
 
     class Meta:
-        verbose_name = "Used resource"
+        verbose_name = "Puzzle used"
+        verbose_name_plural = "Puzzles used"
         constraints = [
-            # Exactly one of venue / puzzle must be set (DB-level backstop).
-            models.CheckConstraint(
-                name="eventresource_exactly_one_resource",
-                condition=(
-                    models.Q(venue__isnull=False, puzzle__isnull=True)
-                    | models.Q(venue__isnull=True, puzzle__isnull=False)
-                ),
-            ),
-            # Don't attach the same resource to an event twice.
-            models.UniqueConstraint(
-                fields=["event", "venue"],
-                condition=models.Q(venue__isnull=False),
-                name="uniq_event_venue",
-            ),
-            models.UniqueConstraint(
-                fields=["event", "puzzle"],
-                condition=models.Q(puzzle__isnull=False),
-                name="uniq_event_puzzle",
-            ),
+            models.UniqueConstraint(fields=["event", "puzzle"], name="uniq_event_puzzle"),
         ]
 
-    @property
-    def resource(self):
-        return self.venue or self.puzzle
-
-    @property
-    def resource_label(self):
-        if self.venue_id:
-            return f"Venue: {self.venue}"
-        if self.puzzle_id:
-            return f"Puzzle: {self.puzzle}"
-        return "—"
-
     def __str__(self):
-        return self.resource_label
+        return f"{self.puzzle} (for {self.event})"
 
     def clean(self):
         super().clean()
 
-        # Exactly one resource must be chosen.
-        if bool(self.venue_id) == bool(self.puzzle_id):
-            raise ValidationError(
-                "Choose exactly one resource: either a venue or a puzzle."
-            )
-
-        # We can only check the cross-event rules once we know which event (and
-        # therefore which time window / customer) this row belongs to. During
-        # admin inline creation the parent may not be attached yet — the inline
-        # formset performs the authoritative check in that case (see admin.py).
         event = self.event if self.event_id else None
         if not event or not event.start or not event.end:
             return
         if not event.blocks_resources:
             return  # cancelled events don't reserve anything
 
-        # Rule 1: no overlapping time window for the same resource.
-        clashes = overlapping_resource_events(
-            venue=self.venue if self.venue_id else None,
-            puzzle=self.puzzle if self.puzzle_id else None,
-            start=event.start,
-            end=event.end,
+        # Rule: a puzzle with physical components can't overlap another event.
+        clashes = overlapping_puzzle_events(
+            puzzle=self.puzzle, start=event.start, end=event.end,
             exclude_event_id=event.id,
         ).exclude(pk=self.pk)
-
         first = clashes.first()
         if first is not None:
             other = first.event
             raise ValidationError(
-                "{res} is already booked for an overlapping time "
-                "({start} – {end}) by event “{other}”.".format(
-                    res=self.resource_label,
+                "“{puzzle}” has physical components and is already in use "
+                "for an overlapping time ({start} – {end}) by “{other}”.".format(
+                    puzzle=self.puzzle,
                     start=timezone.localtime(other.start).strftime("%d %b %H:%M"),
                     end=timezone.localtime(other.end).strftime("%d %b %H:%M"),
                     other=other,
                 )
             )
 
-        # Rule 2: a puzzle must not be reused across a customer's events.
+        # Rule: a puzzle must not be reused across a customer's events.
         # This is a soft rule — tick ``allow_reuse`` to override it.
-        if self.puzzle_id and not self.allow_reuse:
+        if not self.allow_reuse:
             reused = puzzle_events_for_customer(
-                puzzle=self.puzzle,
-                customer=event.customer,
-                exclude_event_id=event.id,
+                puzzle=self.puzzle, customer=event.customer, exclude_event_id=event.id,
             ).exclude(pk=self.pk)
             dup = reused.first()
             if dup is not None:
                 raise ValidationError(
                     "Puzzle “{puzzle}” is already used by another event for "
                     "{customer} ({other}). A puzzle can only be used once per "
-                    "customer.".format(
+                    "customer (tick “Allow reuse” to override).".format(
                         puzzle=self.puzzle,
                         customer=event.customer,
                         other=dup.event,
                     )
                 )
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.allow_reuse and self.event_id:
+            # Propagate the override to any other (non-cancelled) event for the
+            # same customer using this puzzle. Without this, re-opening and
+            # re-saving *that* event would re-trigger the reuse conflict from
+            # its own side, since it wouldn't itself carry the override.
+            EventPuzzle.objects.filter(
+                puzzle_id=self.puzzle_id,
+                event__customer_id=self.event.customer_id,
+            ).exclude(pk=self.pk).exclude(
+                event__status=Event.Status.CANCELLED
+            ).update(allow_reuse=True)

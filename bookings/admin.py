@@ -1,14 +1,18 @@
 """
 Admin configuration for the internal PM tool, skinned with django-unfold.
 
-Two cross-event rules are enforced in two complementary places each — the
-model ``clean()`` (see models.py, also covers programmatic/API use) and the
-admin inline formset here (authoritative for the UI, because it sees the
-event's *edited* start/end/customer and all resource rows submitted together,
-including on a brand-new event that has no primary key yet):
+Business rules and where they're enforced:
 
-* a Venue/Puzzle must not be double-booked for overlapping time windows;
-* a Puzzle must not be reused across a customer's events.
+* Venue double-booking (an event has exactly one venue) — Event.clean(),
+  surfaces as a normal field error on the admin's "venue" field.
+* Physical-puzzle double-booking — EventPuzzle.clean() (model-level) and
+  EventPuzzleInlineFormSet.clean() here (authoritative for the admin UI,
+  since it sees the event's *edited* start/end and all puzzle rows submitted
+  together, including on a brand-new event with no primary key yet). Puzzles
+  without physical components have no such limit.
+* Puzzle reuse across a customer's events — same two places, and it's a soft
+  rule: tick "Allow reuse" to override (see EventPuzzle.save() for how the
+  override then propagates to the other conflicting event automatically).
 """
 from django.contrib import admin
 from django.core.exceptions import ValidationError
@@ -21,16 +25,17 @@ from unfold.admin import ModelAdmin, TabularInline
 from .models import (
     Customer,
     Event,
-    EventResource,
+    EventPuzzle,
     Puzzle,
+    PuzzleFile,
     Venue,
-    overlapping_resource_events,
+    overlapping_puzzle_events,
     puzzle_events_for_customer,
 )
 
 
-class EventResourceInlineFormSet(BaseInlineFormSet):
-    """Validate the whole set of resources against the event's edited fields."""
+class EventPuzzleInlineFormSet(BaseInlineFormSet):
+    """Validate the whole set of puzzles against the event's edited fields."""
 
     def clean(self):
         super().clean()
@@ -42,7 +47,7 @@ class EventResourceInlineFormSet(BaseInlineFormSet):
         if not start or not end:
             return  # parent form already errored on the missing/invalid window
 
-        # Cancelled events release their resources — nothing to guard.
+        # Cancelled events release their puzzles — nothing to guard.
         if getattr(event, "status", None) == Event.Status.CANCELLED:
             return
 
@@ -54,48 +59,41 @@ class EventResourceInlineFormSet(BaseInlineFormSet):
             if not cd or cd.get("DELETE"):
                 continue
 
-            venue = cd.get("venue")
             puzzle = cd.get("puzzle")
-            if bool(venue) == bool(puzzle):
-                continue  # exactly-one rule reported at the row level
+            if not puzzle:
+                continue
 
-            key = ("venue", venue.pk) if venue else ("puzzle", puzzle.pk)
-            if key in seen:
+            if puzzle.pk in seen:
                 raise ValidationError(
-                    "The same resource is attached to this event twice."
+                    "The same puzzle is attached to this event twice."
                 )
-            seen.add(key)
+            seen.add(puzzle.pk)
 
-            # Rule 1: overlapping time window for the same resource.
-            clashes = overlapping_resource_events(
-                venue=venue if venue else None,
-                puzzle=puzzle if puzzle else None,
-                start=start,
-                end=end,
-                exclude_event_id=event.pk,
+            # Rule: a puzzle with physical components can't overlap another event.
+            clashes = overlapping_puzzle_events(
+                puzzle=puzzle, start=start, end=end, exclude_event_id=event.pk,
             )
             if form.instance.pk:
                 clashes = clashes.exclude(pk=form.instance.pk)
             clash = clashes.first()
             if clash is not None:
                 other = clash.event
-                label = f"Venue “{venue}”" if venue else f"Puzzle “{puzzle}”"
                 raise ValidationError(
                     format_html(
-                        "{} is already booked for an overlapping window "
-                        "({} – {}) by “{}”.",
-                        label,
+                        "“{}” has physical components and is already in use "
+                        "for an overlapping time ({} – {}) by “{}”.",
+                        str(puzzle),
                         timezone.localtime(other.start).strftime("%d %b %H:%M"),
                         timezone.localtime(other.end).strftime("%d %b %H:%M"),
                         str(other),
                     )
                 )
 
-            # Rule 2: a puzzle must not be reused across a customer's events.
+            # Rule: a puzzle must not be reused across a customer's events.
             # Soft rule — the row's "allow reuse" checkbox overrides it.
-            if puzzle and customer and not cd.get("allow_reuse"):
+            if customer and not cd.get("allow_reuse"):
                 reused = puzzle_events_for_customer(
-                    puzzle=puzzle, customer=customer, exclude_event_id=event.pk
+                    puzzle=puzzle, customer=customer, exclude_event_id=event.pk,
                 )
                 if form.instance.pk:
                     reused = reused.exclude(pk=form.instance.pk)
@@ -111,14 +109,14 @@ class EventResourceInlineFormSet(BaseInlineFormSet):
                     )
 
 
-class EventResourceInline(TabularInline):
-    model = EventResource
-    formset = EventResourceInlineFormSet
+class EventPuzzleInline(TabularInline):
+    model = EventPuzzle
+    formset = EventPuzzleInlineFormSet
     extra = 1
-    fields = ["venue", "puzzle", "allow_reuse"]
-    autocomplete_fields = ["venue", "puzzle"]
-    verbose_name = "Used resource"
-    verbose_name_plural = "Resources used (one venue or puzzle per row)"
+    fields = ["puzzle", "allow_reuse"]
+    autocomplete_fields = ["puzzle"]
+    verbose_name = "Puzzle used"
+    verbose_name_plural = "Puzzles used"
 
 
 @admin.register(Customer)
@@ -140,14 +138,37 @@ class VenueAdmin(ModelAdmin):
     fields = ["name", "address", "capacity", "notes", "is_active"]
 
 
+class PuzzleFileInline(TabularInline):
+    model = PuzzleFile
+    extra = 1
+    fields = ["file", "uploaded_at"]
+    readonly_fields = ["uploaded_at"]
+
+
 @admin.register(Puzzle)
 class PuzzleAdmin(ModelAdmin):
-    list_display = ["name", "flexible_answer", "has_github", "is_active"]
-    list_filter = ["is_active", "flexible_answer"]
-    search_fields = ["name", "answer"]
-    fields = [
-        "name", "flexible_answer", "answer", "github_url", "notes", "is_active",
+    inlines = [PuzzleFileInline]
+    list_display = [
+        "name", "restrictions_badge", "has_physical_components", "tag_list", "has_github",
     ]
+    list_filter = ["has_physical_components", "answer_restrictions"]
+    search_fields = ["name", "answer", "tags__name"]
+    fields = [
+        "name", "has_physical_components", "answer_restrictions", "answer",
+        "hardware_required", "github_url", "tags", "notes",
+    ]
+
+    @admin.display(description="Answer")
+    def restrictions_badge(self, obj):
+        if obj.answer_restrictions:
+            return format_html(
+                '<span style="color:#b45309;font-weight:600;">⚠ Restricted</span>'
+            )
+        return format_html('<span style="color:#15803d;font-weight:600;">✓</span>')
+
+    @admin.display(description="Tags")
+    def tag_list(self, obj):
+        return ", ".join(t.name for t in obj.tags.all()) or "—"
 
     @admin.display(description="GitHub", boolean=True)
     def has_github(self, obj):
@@ -164,13 +185,13 @@ STATUS_COLOURS = {
 
 @admin.register(Event)
 class EventAdmin(ModelAdmin):
-    inlines = [EventResourceInline]
+    inlines = [EventPuzzleInline]
     date_hierarchy = "start"
-    list_display = ["customer", "start", "end", "status_badge", "resource_summary"]
-    list_filter = ["status", "start"]
-    search_fields = ["customer__name", "notes"]
-    autocomplete_fields = ["customer"]
-    list_select_related = ["customer"]
+    list_display = ["name", "customer", "venue", "start", "end", "status_badge", "puzzle_count"]
+    list_filter = ["status", "start", "venue"]
+    search_fields = ["name", "customer__name", "notes"]
+    autocomplete_fields = ["customer", "venue"]
+    list_select_related = ["customer", "venue"]
     ordering = ["-start"]
 
     @admin.display(description="Status")
@@ -182,12 +203,9 @@ class EventAdmin(ModelAdmin):
             obj.get_status_display(),
         )
 
-    @admin.display(description="Resources")
-    def resource_summary(self, obj):
-        parts = [r.resource_label for r in obj.resources.all()]
-        return ", ".join(parts) if parts else "—"
+    @admin.display(description="Puzzles")
+    def puzzle_count(self, obj):
+        return obj.event_puzzles.count()
 
     def get_queryset(self, request):
-        return super().get_queryset(request).prefetch_related(
-            "resources__venue", "resources__puzzle"
-        )
+        return super().get_queryset(request).prefetch_related("event_puzzles__puzzle")

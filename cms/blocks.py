@@ -4,8 +4,30 @@ Reusable StreamField blocks for building flashy public pages without code.
 Editors compose pages from these in the Wagtail admin. Keep the block set
 small and opinionated so the site stays visually consistent.
 """
+from django.core.exceptions import ValidationError
+
 from wagtail import blocks
 from wagtail.images.blocks import ImageChooserBlock
+
+
+class LinkURLBlock(blocks.CharBlock):
+    """
+    A link target that isn't restricted to http(s) like Wagtail's URLBlock —
+    accepts mailto:/tel: links, in-page anchors, and relative paths too.
+    Still rejects unsafe schemes (e.g. javascript:) since this is rendered
+    directly into an href attribute.
+    """
+
+    ALLOWED_PREFIXES = ("http://", "https://", "mailto:", "tel:", "/", "#")
+
+    def clean(self, value):
+        value = super().clean(value)
+        if value and not value.startswith(self.ALLOWED_PREFIXES):
+            raise ValidationError(
+                "Enter a full URL (https://…), a path (/page), an in-page "
+                "link (#section), or a mailto:/tel: link."
+            )
+        return value
 
 
 class HeadingBlock(blocks.StructBlock):
@@ -73,7 +95,10 @@ class CTABlock(blocks.StructBlock):
     heading = blocks.CharBlock(required=True)
     text = blocks.TextBlock(required=False)
     button_label = blocks.CharBlock(required=True, default="Get in touch")
-    button_url = blocks.URLBlock(required=False)
+    button_url = LinkURLBlock(
+        required=False,
+        help_text="A URL (https://…), a mailto:/tel: link, or a path.",
+    )
     button_page = blocks.PageChooserBlock(required=False)
 
     class Meta:
