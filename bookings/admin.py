@@ -162,7 +162,7 @@ class PuzzleAdmin(ModelAdmin):
     def restrictions_badge(self, obj):
         if obj.answer_restrictions:
             return format_html(
-                '<span style="color:#b45309;font-weight:600;">⚠ Restricted</span>'
+                '<span style="color:#b45309;font-weight:600;" title="Answer restrictions">⚠</span>'
             )
         return format_html('<span style="color:#15803d;font-weight:600;">✓</span>')
 
