@@ -159,7 +159,47 @@ python manage.py test          # 23 tests, incl. admin-POST and override-propaga
 nginx terminates TLS and proxies to gunicorn; certbot renews certificates
 automatically and nginx reloads every 6h to pick them up. The `web` entrypoint
 runs migrations, seeds initial content (idempotent), and collects static on
-each start.
+each start — including when Watchtower redeploys a new image (see below), so
+schema changes apply automatically before the new code serves traffic.
+
+### Continuous deployment: GHCR + Watchtower
+
+Every push to `main` that passes CI (`.github/workflows/ci.yml`, `publish`
+job) builds the `Dockerfile` image and pushes it to GitHub Container Registry
+as `ghcr.io/pathcipher/website:latest` (and `:sha-<commit>`). The VPS runs
+**Watchtower**, which polls GHCR (every `WATCHTOWER_POLL_INTERVAL` seconds,
+default 300) and automatically pulls + redeploys the `web` container when a
+new image lands — no manual `git pull`/rebuild needed for routine deploys.
+Watchtower only touches containers labelled `com.centurylabs.watchtower.enable`
+(just `web`), so `db`/`nginx`/`certbot` are never auto-updated by it.
+
+**One-time setup after the first push to `main`:** GHCR packages are private
+by default, even in a public repo. Either:
+
+- **Make the package public** (simplest): on GitHub → the repo's **Packages**
+  tab → `website` package → *Package settings* → change visibility to
+  Public. Watchtower (and anyone) can then pull with no credentials.
+- **Or keep it private**: on the VPS, `docker login ghcr.io -u <username>`
+  with a PAT that has `read:packages` scope (this writes
+  `~/.docker/config.json`), then mount that file into the `watchtower`
+  service (`- $HOME/.docker/config.json:/config.json:ro`, and set
+  `DOCKER_CONFIG: /` in its environment) so Watchtower can authenticate.
+
+To pin a specific build instead of always tracking `:latest`, set
+`DOCKER_IMAGE=ghcr.io/pathcipher/website:sha-<commit>` in `.env`.
+
+**What Watchtower does *not* cover:** only the application code baked into
+the image (Python/templates/static — everything `Dockerfile` copies in).
+`docker-compose.prod.yml`, the nginx config, `init-letsencrypt.sh`, and `.env`
+itself all live directly on the VPS as a git checkout, not inside the image.
+So routine app-code changes need no VPS action at all (Watchtower picks them
+up), but changing the compose file, nginx template, or adding a new env
+var still needs a manual, one-time:
+```bash
+git pull && docker compose -f docker-compose.prod.yml up -d
+```
+on the VPS to take effect — Watchtower can't apply infrastructure changes,
+only new application images.
 
 ### Run on boot (systemd)
 

@@ -1,11 +1,16 @@
-# Production stack: Postgres + gunicorn + nginx (TLS) + certbot.
+# Production stack: Postgres + gunicorn + nginx (TLS) + certbot + Watchtower.
 #
 # One-time TLS bootstrap (after DNS points at the VPS and .env is filled in):
 #   ./init-letsencrypt.sh
 # Then day-to-day:
-#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml up -d --build     # build locally, or:
+#   docker compose -f docker-compose.prod.yml pull web && \
+#   docker compose -f docker-compose.prod.yml up -d             # use the published GHCR image
 #
 # certbot renews automatically; nginx reloads every 6h to pick up new certs.
+# Watchtower polls GHCR for a new `web` image and redeploys it automatically
+# (see the "watchtower" service below and the README for registry-auth notes
+# if you keep the GHCR package private).
 
 services:
   db:
@@ -24,9 +29,16 @@ services:
       retries: 5
 
   web:
+    # `image:` lets this be pulled pre-built from GHCR (what Watchtower acts
+    # on); `build:` keeps `docker compose build`/`up --build` working for
+    # local iteration. Override DOCKER_IMAGE in .env to pin a specific tag.
+    image: ${DOCKER_IMAGE:-ghcr.io/pathcipher/website:latest}
     build: .
     restart: unless-stopped
     # Default CMD (gunicorn) from the Dockerfile is used.
+    labels:
+      # Only this service is watched/auto-updated by Watchtower.
+      - "com.centurylabs.watchtower.enable=true"
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.prod
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
@@ -84,6 +96,20 @@ services:
     # Attempt renewal every 12h; no-op until a cert is near expiry.
     entrypoint: >
       sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done"
+
+  # Polls GHCR for a new `web` image (pushed by CI on every merge to main)
+  # and redeploys it automatically. Only touches containers carrying the
+  # watchtower.enable label above — db/nginx/certbot are left alone.
+  watchtower:
+    image: containrrr/watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_ROLLING_RESTART: "true"
+      WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_POLL_INTERVAL:-300}
 
 volumes:
   pgdata:
