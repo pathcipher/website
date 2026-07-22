@@ -110,6 +110,13 @@ services:
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_ROLLING_RESTART: "true"
       WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_POLL_INTERVAL:-300}
+      # Watchtower's bundled Docker client defaults to a very old API version
+      # and doesn't negotiate up correctly against newer Docker Engines,
+      # which now refuse anything below 1.40 ("client version 1.25 is too
+      # old"). Pin a modern version to skip that broken negotiation. Check
+      # your host's actual ceiling with `docker version` (Server > API
+      # version) if this value is ever rejected as too new.
+      DOCKER_API_VERSION: ${WATCHTOWER_DOCKER_API_VERSION:-1.44}
 
 volumes:
   pgdata:
