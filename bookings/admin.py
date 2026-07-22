@@ -145,16 +145,33 @@ class PuzzleFileInline(TabularInline):
     readonly_fields = ["uploaded_at"]
 
 
+class HasPhysicalComponentsFilter(admin.SimpleListFilter):
+    """Filter on the derived has_physical_components property (no such column)."""
+
+    title = "physical components"
+    parameter_name = "has_physical_components"
+
+    def lookups(self, request, model_admin):
+        return (("yes", "Physical"), ("no", "Online-only"))
+
+    def queryset(self, request, queryset):
+        if self.value() == "yes":
+            return queryset.exclude(hardware_required="")
+        if self.value() == "no":
+            return queryset.filter(hardware_required="")
+        return queryset
+
+
 @admin.register(Puzzle)
 class PuzzleAdmin(ModelAdmin):
     inlines = [PuzzleFileInline]
     list_display = [
-        "name", "restrictions_badge", "has_physical_components", "tag_list", "has_github",
+        "name", "restrictions_badge", "physical_components_badge", "tag_list", "has_github",
     ]
-    list_filter = ["has_physical_components", "answer_restrictions"]
+    list_filter = [HasPhysicalComponentsFilter, "answer_restrictions"]
     search_fields = ["name", "answer", "tags__name"]
     fields = [
-        "name", "has_physical_components", "answer_restrictions", "answer",
+        "name", "answer_restrictions", "answer",
         "hardware_required", "github_url", "tags", "notes",
     ]
 
@@ -165,6 +182,10 @@ class PuzzleAdmin(ModelAdmin):
                 '<span style="color:#b45309;font-weight:600;" title="Answer restrictions">⚠</span>'
             )
         return format_html('<span style="color:#15803d;font-weight:600;">✓</span>')
+
+    @admin.display(description="Physical", boolean=True)
+    def physical_components_badge(self, obj):
+        return obj.has_physical_components
 
     @admin.display(description="Tags")
     def tag_list(self, obj):

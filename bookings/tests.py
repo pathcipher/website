@@ -88,11 +88,9 @@ class PuzzleOverlapAndReuseTests(TestCase):
         self.customer = Customer.objects.create(name="Acme Team")
         self.other_customer = Customer.objects.create(name="Beta Team")
         self.physical_puzzle = Puzzle.objects.create(
-            name="Heist Kit", has_physical_components=True
+            name="Heist Kit", hardware_required="Lockbox\nUV torch"
         )
-        self.online_puzzle = Puzzle.objects.create(
-            name="Web Riddle", has_physical_components=False
-        )
+        self.online_puzzle = Puzzle.objects.create(name="Web Riddle")
 
     def _event(self, start, end, status=Event.Status.CONFIRMED, customer=None,
                name="Test event"):
@@ -223,9 +221,12 @@ class PuzzleFieldTests(TestCase):
         p = Puzzle.objects.create(name="Kit")
         self.assertFalse(p.answer_restrictions)
 
-    def test_has_physical_components_defaults_true(self):
-        p = Puzzle.objects.create(name="Kit")
-        self.assertTrue(p.has_physical_components)
+    def test_has_physical_components_is_derived_from_hardware_required(self):
+        online = Puzzle.objects.create(name="No hardware")
+        self.assertFalse(online.has_physical_components)
+
+        physical = Puzzle.objects.create(name="Needs kit", hardware_required="UV torch")
+        self.assertTrue(physical.has_physical_components)
 
 
 class AdminEventFormTests(TestCase):
@@ -234,7 +235,7 @@ class AdminEventFormTests(TestCase):
     def setUp(self):
         self.customer = Customer.objects.create(name="Acme Team")
         self.venue = Venue.objects.create(name="The Vault")
-        self.puzzle = Puzzle.objects.create(name="Heist Kit", has_physical_components=True)
+        self.puzzle = Puzzle.objects.create(name="Heist Kit", hardware_required="Lockbox")
         admin_user = get_user_model().objects.create_superuser("boss", "boss@example.com", "pw")
         self.client.force_login(admin_user)
 

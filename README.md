@@ -104,10 +104,11 @@ intervals throughout (10:00–11:00 and 11:00–12:00 do **not** clash):
 
 - **Venue double-booking** — `Event.clean()`. A venue can't host two
   overlapping (non-cancelled) events.
-- **Physical-puzzle double-booking** — `EventPuzzle.clean()`. A `Puzzle` with
-  `has_physical_components=True` can't be used by two overlapping events (its
-  props can only be in one place at once). Puzzles without physical
-  components (purely online) have no such limit.
+- **Physical-puzzle double-booking** — `EventPuzzle.clean()`. A `Puzzle` whose
+  `has_physical_components` is true can't be used by two overlapping events
+  (its props can only be in one place at once). That's not a separate flag —
+  it's derived from whether `hardware_required` lists anything, so a puzzle
+  with no hardware is treated as online-only and has no such limit.
 - **Puzzle reuse across a customer's events** — `EventPuzzle.clean()`, a
   *soft* rule: a repeat customer normally shouldn't get the same puzzle twice
   (answer/narrative spoiling). Tick **"Allow reuse for this customer"** on the

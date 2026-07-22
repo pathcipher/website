@@ -72,12 +72,6 @@ class Puzzle(models.Model):
     """
 
     name = models.CharField(max_length=200)
-    has_physical_components = models.BooleanField(
-        default=True,
-        help_text="Tick if this puzzle involves physical props/kit that can "
-                  "only be in one place at a time. Untick for online-only "
-                  "puzzles, which can run at multiple events simultaneously.",
-    )
     answer_restrictions = models.BooleanField(
         default=False,
         verbose_name="Answer restrictions",
@@ -114,6 +108,14 @@ class Puzzle(models.Model):
             line.strip() for line in self.hardware_required.splitlines()
             if line.strip()
         ]
+
+    @property
+    def has_physical_components(self):
+        """
+        Inferred from whether any hardware is listed — no separate flag to
+        keep in sync. A puzzle with no hardware is treated as online-only.
+        """
+        return bool(self.hardware_required_list)
 
 
 class PuzzleFile(models.Model):
